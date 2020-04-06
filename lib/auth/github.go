@@ -159,6 +159,7 @@ func (s *AuthServer) validateGithubAuthCallback(q url.Values) (*githubAuthRespon
 	claims, err := populateGithubClaims(&githubAPIClient{
 		token:      token.AccessToken,
 		authServer: s,
+		apiServer:  connector.GetGithubAPIURL(),
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -428,8 +429,8 @@ func (s *AuthServer) getGithubOAuth2Client(connector services.GithubConnector) (
 		},
 		RedirectURL: connector.GetRedirectURL(),
 		Scope:       GithubScopes,
-		AuthURL:     GithubAuthURL,
-		TokenURL:    GithubTokenURL,
+		AuthURL:     connector.GetGithubAuthURL(),
+		TokenURL:    connector.GetGithubTokenURL(),
 	}
 	cachedClient, ok := s.githubClients[connector.GetName()]
 	if ok && oauth2ConfigsEqual(cachedClient.config, config) {
@@ -462,6 +463,7 @@ type githubAPIClient struct {
 	token string
 	// authServer points to the Auth Server.
 	authServer *AuthServer
+	apiServer  string
 }
 
 // userResponse represents response from "user" API call
@@ -565,7 +567,7 @@ func (c *githubAPIClient) getTeams() ([]teamResponse, error) {
 
 // get makes a GET request to the provided URL using the client's token for auth
 func (c *githubAPIClient) get(url string) ([]byte, string, error) {
-	request, err := http.NewRequest("GET", fmt.Sprintf("%v%v", GithubAPIURL, url), nil)
+	request, err := http.NewRequest("GET", fmt.Sprintf("%v%v", c.apiServer, url), nil)
 	if err != nil {
 		return nil, "", trace.Wrap(err)
 	}

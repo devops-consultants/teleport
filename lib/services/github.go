@@ -42,6 +42,18 @@ type GithubConnector interface {
 	GetClientSecret() string
 	// SetClientSecret sets the connector client secret
 	SetClientSecret(string)
+	// GetGithubAPIURL returns the connector GitHub API URL
+	GetGithubAPIURL() string
+	// SetGithubAPIURL sets the connector GitHub API URL
+	SetGithubAPIURL(string)
+	// GetGithubAuthURL returns the connector GitHub Auth login URL
+	GetGithubAuthURL() string
+	// SetGithubAuthURL sets the connector GitHub Auth login URL
+	SetGithubAuthURL(string)
+	// GetGithubTokenURL returns the connector GitHub Auth login URL
+	GetGithubTokenURL() string
+	// SetGithubTokenURL sets the connector GitHub Auth login URL
+	SetGithubTokenURL(string)
 	// GetRedirectURL returns the connector redirect URL
 	GetRedirectURL() string
 	// SetRedirectURL sets the connector redirect URL
@@ -92,6 +104,10 @@ type GithubConnectorSpecV3 struct {
 	ClientID string `json:"client_id"`
 	// ClientSecret is the Github OAuth app client secret
 	ClientSecret string `json:"client_secret"`
+	// GithubWebURL is the GitHub Web URI
+	GithubWebURL string `json:"github_web_url"`
+	// GithubAPIURL is the GitHub API URI
+	GithubAPIURL string `json:"github_api_url"`
 	// RedirectURL is the authorization callback URL
 	RedirectURL string `json:"redirect_url"`
 	// TeamsToLogins maps Github team memberships onto allowed logins/roles
@@ -206,6 +222,48 @@ func (c *GithubConnectorV3) GetClientSecret() string {
 // SetClientSecret sets the connector client secret
 func (c *GithubConnectorV3) SetClientSecret(secret string) {
 	c.Spec.ClientSecret = secret
+}
+
+// GetGithubAuthURL returns the GitHub Web Auth URL
+func (c *GithubConnectorV3) GetGithubAuthURL() string {
+	if c.Spec.GithubWebURL != "" {
+		return fmt.Sprintf("%s/login/oauth/authorize", c.Spec.GithubWebURL)
+	} else {
+		return GithubAuthURL
+	}
+}
+
+// SetGithubAuthURL sets the connector GitHub Web Auth URL
+func (c *GithubConnectorV3) SetGithubAuthURL(githubAuthURL string) {
+	// c.Spec.GithubWebURL = githubAuthURL
+}
+
+// GetGithubTokenURL returns the GitHub Web Auth URL
+func (c *GithubConnectorV3) GetGithubTokenURL() string {
+	if c.Spec.GithubWebURL != "" {
+		return fmt.Sprintf("%s/login/oauth/access_token", c.Spec.GithubWebURL)
+	} else {
+		return GithubTokenURL
+	}
+}
+
+// SetGithubTokenURL sets the connector GitHub Web Auth URL
+func (c *GithubConnectorV3) SetGithubTokenURL(githubTokenURL string) {
+	// c.Spec.GithubWebURL = githubTokenURL
+}
+
+// GetGithubAPIURL returns the GitHub API URL
+func (c *GithubConnectorV3) GetGithubAPIURL() string {
+	if c.Spec.GithubAPIURL != "" {
+		return c.Spec.GithubAPIURL
+	} else {
+		return GithubAPIURL
+	}
+}
+
+// SetGithubAPIURL sets the connector GitHub API URL
+func (c *GithubConnectorV3) SetGithubAPIURL(githubAPIURL string) {
+	c.Spec.GithubAPIURL = githubAPIURL
 }
 
 // GetRedirectURL returns the connector redirect URL
@@ -353,7 +411,9 @@ var GithubConnectorSpecV3Schema = fmt.Sprintf(`{
   "required": ["client_id", "client_secret", "redirect_url"],
   "properties": {
     "client_id": {"type": "string"},
-    "client_secret": {"type": "string"},
+	"client_secret": {"type": "string"},
+	"github_web_url": {"type": "string"},
+	"github_api_url": {"type": "string"},
     "redirect_url": {"type": "string"},
     "display": {"type": "string"},
     "teams_to_logins": {
@@ -385,3 +445,14 @@ var TeamMappingSchema = `{
     }
   }
 }`
+
+const (
+	// GithubAuthURL is the Github authorization endpoint
+	GithubAuthURL = "https://github.com/login/oauth/authorize"
+
+	// GithubTokenURL is the Github token exchange endpoint
+	GithubTokenURL = "https://github.com/login/oauth/access_token"
+
+	// GithubAPIURL is the Github base API URL
+	GithubAPIURL = "https://api.github.com"
+)
