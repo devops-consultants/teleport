@@ -555,6 +555,10 @@ func NewTeleport(cfg *Config) (*TeleportProcess, error) {
 		}
 	}
 
+	if uuid.Parse(cfg.HostUUID) == nil {
+		log.Warnf("Host UUID %q is not a true UUID (not eligible for UUID-based proxying)", cfg.HostUUID)
+	}
+
 	// if user started auth and another service (without providing the auth address for
 	// that service, the address of the in-process auth will be used
 	if cfg.Auth.Enabled && len(cfg.AuthServers) == 0 {
@@ -780,15 +784,9 @@ func initUploadHandler(auditConfig services.AuditConfig) (events.UploadHandler, 
 		}
 		return handler, nil
 	case teleport.SchemeS3:
-		region := auditConfig.Region
-		if uriRegion := uri.Query().Get(teleport.Region); uriRegion != "" {
-			region = uriRegion
-		}
-		handler, err := s3sessions.NewHandler(s3sessions.Config{
-			Bucket: uri.Host,
-			Region: region,
-			Path:   uri.Path,
-		})
+		config := s3sessions.Config{}
+		config.SetFromURL(uri, auditConfig.Region)
+		handler, err := s3sessions.NewHandler(config)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -1269,6 +1267,7 @@ func (process *TeleportProcess) newAccessCache(cfg accessCacheConfig) (*cache.Ca
 	}
 	var cacheBackend backend.Backend
 	if cfg.inMemory {
+		process.Debugf("Creating in-memory backend for %v.", cfg.cacheName)
 		mem, err := memory.New(memory.Config{
 			Context:   process.ExitContext(),
 			EventsOff: !cfg.events,
@@ -1279,6 +1278,7 @@ func (process *TeleportProcess) newAccessCache(cfg accessCacheConfig) (*cache.Ca
 		}
 		cacheBackend = mem
 	} else {
+		process.Debugf("Creating sqlite backend for %v.", cfg.cacheName)
 		path := filepath.Join(append([]string{process.Config.DataDir, "cache"}, cfg.cacheName...)...)
 		if err := os.MkdirAll(path, teleport.SharedDirMode); err != nil {
 			return nil, trace.ConvertSystemError(err)
@@ -1347,6 +1347,7 @@ func (process *TeleportProcess) newLocalCache(clt auth.ClientI, setupConfig cach
 		return clt, nil
 	}
 	cache, err := process.newAccessCache(accessCacheConfig{
+		inMemory:  process.Config.CachePolicy.Type == memory.GetName(),
 		services:  clt,
 		setup:     process.setupCachePolicy(setupConfig),
 		cacheName: cacheName,
@@ -1787,6 +1788,8 @@ func (process *TeleportProcess) getAdditionalPrincipals(role teleport.Role) ([]s
 		addrs = append(addrs, process.Config.Proxy.SSHPublicAddrs...)
 		addrs = append(addrs, process.Config.Proxy.TunnelPublicAddrs...)
 		addrs = append(addrs, process.Config.Proxy.Kube.PublicAddrs...)
+		// all proxies need to be dialable on loopback
+		addrs = append(addrs, *utils.MustParseAddr(`127.0.0.1`))
 		// Automatically add wildcards for every proxy public address for k8s SNI routing
 		if process.Config.Proxy.Kube.Enabled {
 			for _, publicAddr := range utils.JoinAddrSlices(process.Config.Proxy.PublicAddrs, process.Config.Proxy.Kube.PublicAddrs) {
@@ -1802,6 +1805,10 @@ func (process *TeleportProcess) getAdditionalPrincipals(role teleport.Role) ([]s
 	case teleport.RoleAuth, teleport.RoleAdmin:
 		addrs = process.Config.Auth.PublicAddrs
 	case teleport.RoleNode:
+		// DELETE IN 5.0: We are manually adding HostUUID here in order
+		// to allow UUID based routing to function with older Auth Servers
+		// which don't automatically add UUID to the principal list.
+		principals = append(principals, process.Config.HostUUID)
 		addrs = process.Config.SSH.PublicAddrs
 		// If advertise IP is set, add it to the list of principals. Otherwise
 		// add in the default (0.0.0.0) which will be replaced by the Auth Server

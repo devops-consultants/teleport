@@ -64,8 +64,6 @@ import (
 )
 
 const (
-	Loopback = "127.0.0.1"
-	Host     = "localhost"
 	HostID   = "00000000-0000-0000-0000-000000000000"
 	Site     = "local-site"
 
@@ -90,8 +88,9 @@ var _ = check.Suite(&IntSuite{})
 func TestMain(m *testing.M) {
 	// If the test is re-executing itself, execute the command that comes over
 	// the pipe.
-	if len(os.Args) == 2 && os.Args[1] == teleport.ExecSubCommand {
-		srv.RunCommand()
+	if len(os.Args) == 2 &&
+		(os.Args[1] == teleport.ExecSubCommand || os.Args[1] == teleport.ForwardSubCommand) {
+		srv.RunAndExit(os.Args[1])
 		return
 	}
 
@@ -589,6 +588,90 @@ func (s *IntSuite) TestInteroperability(c *check.C) {
 			c.Assert(strings.Contains(outbuf.String(), tt.outContains), check.Equals, true, comment)
 		}
 	}
+}
+
+// TestUUIDBasedProxy verifies that attempts to proxy to nodes using ambiguous
+// hostnames fails with the correct error, and that proxying by UUID succeeds.
+func (s *IntSuite) TestUUIDBasedProxy(c *check.C) {
+	var err error
+	tr := utils.NewTracer(utils.ThisFunction()).Start()
+	defer tr.Stop()
+
+	t := s.newTeleport(c, nil, true)
+	defer t.Stop(true)
+
+	site := t.GetSiteAPI(Site)
+
+	// addNode adds a node to the teleport instance, returning its uuid.
+	// All nodes added this way have the same hostname.
+	addNode := func() (string, error) {
+		nodeSSHPort := s.getPorts(1)[0]
+		tconf := service.MakeDefaultConfig()
+
+		tconf.Hostname = Host
+
+		tconf.SSH.Enabled = true
+		tconf.SSH.Addr.Addr = net.JoinHostPort(t.Hostname, fmt.Sprintf("%v", nodeSSHPort))
+
+		node, err := t.StartNode(tconf)
+		if err != nil {
+			return "", trace.Wrap(err)
+		}
+
+		ident, err := node.GetIdentity(teleport.RoleNode)
+		if err != nil {
+			return "", trace.Wrap(err)
+		}
+
+		return ident.ID.HostID()
+	}
+
+	// add two nodes with the same hostname.
+	uuid1, err := addNode()
+	c.Assert(err, check.IsNil)
+
+	uuid2, err := addNode()
+	c.Assert(err, check.IsNil)
+
+	// wait up to 10 seconds for supplied node names to show up.
+	waitForNodes := func(site auth.ClientI, nodes ...string) error {
+		tickCh := time.Tick(500 * time.Millisecond)
+		stopCh := time.After(10 * time.Second)
+	Outer:
+		for _, nodeName := range nodes {
+			for {
+				select {
+				case <-tickCh:
+					nodesInSite, err := site.GetNodes(defaults.Namespace, services.SkipValidation())
+					if err != nil && !trace.IsNotFound(err) {
+						return trace.Wrap(err)
+					}
+					for _, node := range nodesInSite {
+						if node.GetName() == nodeName {
+							continue Outer
+						}
+					}
+				case <-stopCh:
+					return trace.BadParameter("waited 10s, did find node %s", nodeName)
+				}
+			}
+		}
+		return nil
+	}
+
+	err = waitForNodes(site, uuid1, uuid2)
+	c.Assert(err, check.IsNil)
+
+	// attempting to run a command by hostname should generate NodeIsAmbiguous error.
+	_, err = runCommand(t, []string{"echo", "Hello there!"}, ClientConfig{Login: s.me.Username, Cluster: Site, Host: Host}, 1)
+	c.Assert(err, check.NotNil)
+	if !strings.Contains(err.Error(), teleport.NodeIsAmbiguous) {
+		c.Errorf("Expected %s, got %s", teleport.NodeIsAmbiguous, err.Error())
+	}
+
+	// attempting to run a command by uuid should succeed.
+	_, err = runCommand(t, []string{"echo", "Hello there!"}, ClientConfig{Login: s.me.Username, Cluster: Site, Host: uuid1}, 1)
+	c.Assert(err, check.IsNil)
 }
 
 // TestInteractive covers SSH into shell and joining the same session from another client
@@ -1538,15 +1621,23 @@ func (s *IntSuite) trustedClusters(c *check.C, test trustedClusterTest) {
 	main := NewInstance(InstanceConfig{ClusterName: clusterMain, HostID: HostID, NodeName: Host, Ports: s.getPorts(5), Priv: s.priv, Pub: s.pub, MultiplexProxy: test.multiplex})
 	aux := NewInstance(InstanceConfig{ClusterName: clusterAux, HostID: HostID, NodeName: Host, Ports: s.getPorts(5), Priv: s.priv, Pub: s.pub})
 
-	// main cluster has a local user and belongs to role "main-devs"
+	// main cluster has a local user and belongs to role "main-devs" and "main-admins"
 	mainDevs := "main-devs"
-	role, err := services.NewRole(mainDevs, services.RoleSpecV3{
+	devsRole, err := services.NewRole(mainDevs, services.RoleSpecV3{
 		Allow: services.RoleConditions{
 			Logins: []string{username},
 		},
 	})
 	c.Assert(err, check.IsNil)
-	main.AddUserWithRole(username, role)
+
+	mainAdmins := "main-admins"
+	adminsRole, err := services.NewRole(mainAdmins, services.RoleSpecV3{
+		Allow: services.RoleConditions{
+			Logins: []string{"superuser"},
+		},
+	})
+
+	main.AddUserWithRole(username, devsRole, adminsRole)
 
 	// for role mapping test we turn on Web API on the main cluster
 	// as it's used
@@ -1564,23 +1655,25 @@ func (s *IntSuite) trustedClusters(c *check.C, test trustedClusterTest) {
 	c.Assert(main.CreateEx(makeConfig(false)), check.IsNil)
 	c.Assert(aux.CreateEx(makeConfig(true)), check.IsNil)
 
-	// auxiliary cluster has a role aux-devs
+	// auxiliary cluster has only a role aux-devs
 	// connect aux cluster to main cluster
 	// using trusted clusters, so remote user will be allowed to assume
 	// role specified by mapping remote role "devs" to local role "local-devs"
 	auxDevs := "aux-devs"
-	role, err = services.NewRole(auxDevs, services.RoleSpecV3{
+	auxRole, err := services.NewRole(auxDevs, services.RoleSpecV3{
 		Allow: services.RoleConditions{
 			Logins: []string{username},
 		},
 	})
 	c.Assert(err, check.IsNil)
-	err = aux.Process.GetAuthServer().UpsertRole(role)
+	err = aux.Process.GetAuthServer().UpsertRole(auxRole)
 	c.Assert(err, check.IsNil)
 	trustedClusterToken := "trusted-cluster-token"
 	err = main.Process.GetAuthServer().UpsertToken(
 		services.MustCreateProvisionToken(trustedClusterToken, []teleport.Role{teleport.RoleTrustedCluster}, time.Time{}))
 	c.Assert(err, check.IsNil)
+	// Note that the mapping omits admins role, this is to cover the scenario
+	// when root cluster and leaf clusters have different role sets
 	trustedCluster := main.Secrets.AsTrustedCluster(trustedClusterToken, services.RoleMap{
 		{Remote: mainDevs, Local: []string{auxDevs}},
 	})
@@ -1621,6 +1714,7 @@ func (s *IntSuite) trustedClusters(c *check.C, test trustedClusterTest) {
 		RouteToCluster: clusterAux,
 	})
 	c.Assert(err, check.IsNil)
+
 	tc, err := main.NewClientWithCreds(ClientConfig{
 		Login:    username,
 		Cluster:  clusterAux,
@@ -1629,6 +1723,15 @@ func (s *IntSuite) trustedClusters(c *check.C, test trustedClusterTest) {
 		JumpHost: test.useJumpHost,
 	}, *creds)
 	c.Assert(err, check.IsNil)
+
+	// tell the client to trust aux cluster CAs (from secrets). this is the
+	// equivalent of 'known hosts' in openssh
+	auxCAS := aux.Secrets.GetCAs()
+	for i := range auxCAS {
+		err = tc.AddTrustedCA(auxCAS[i])
+		c.Assert(err, check.IsNil)
+	}
+
 	output := &bytes.Buffer{}
 	tc.Stdout = output
 	c.Assert(err, check.IsNil)
@@ -1641,6 +1744,13 @@ func (s *IntSuite) trustedClusters(c *check.C, test trustedClusterTest) {
 	}
 	c.Assert(err, check.IsNil)
 	c.Assert(output.String(), check.Equals, "hello world\n")
+
+	// ListNodes expect labels as a value of host
+	tc.Host = ""
+	servers, err := tc.ListNodes(context.TODO())
+	c.Assert(err, check.IsNil)
+	c.Assert(servers, check.HasLen, 2)
+	tc.Host = Loopback
 
 	// check that remote cluster has been provisioned
 	remoteClusters, err := main.Process.GetAuthServer().GetRemoteClusters()

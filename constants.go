@@ -327,6 +327,15 @@ const (
 	// Region is AWS region parameter
 	Region = "region"
 
+	// Endpoint is an optional Host for non-AWS S3
+	Endpoint = "endpoint"
+
+	// Insecure is an optional switch to use HTTP instead of HTTPS
+	Insecure = "insecure"
+
+	// DisableServerSideEncryption is an optional switch to opt out of SSE in case the provider does not support it
+	DisableServerSideEncryption = "disablesse"
+
 	// SchemeFile is a local disk file storage
 	SchemeFile = "file"
 
@@ -350,6 +359,18 @@ const (
 
 	// DebugLevel is a debug logging level name
 	DebugLevel = "debug"
+)
+
+const (
+	// These values are from https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest
+
+	// OIDCPromptSelectAccount instructs the Authorization Server to
+	// prompt the End-User to select a user account.
+	OIDCPromptSelectAccount = "select_account"
+
+	// OIDCAccessTypeOnline indicates that OIDC flow should be performed
+	// with Authorization server and user connected online
+	OIDCAccessTypeOnline = "online"
 )
 
 // Component generates "component:subcomponent1:subcomponent2" strings used
@@ -402,6 +423,10 @@ const (
 // MaxEnvironmentFileLines is the maximum number of lines in a environment file.
 const MaxEnvironmentFileLines = 1000
 
+// MaxResourceSize is the maximum size (in bytes) of a serialized resource.  This limit is
+// typically only enforced aginst resources that are likely to arbitrarily grow (e.g. PluginData).
+const MaxResourceSize = 1000000
+
 const (
 	// CertificateFormatOldSSH is used to make Teleport interoperate with older
 	// versions of OpenSSH.
@@ -431,6 +456,10 @@ const (
 	// TraitKubeGroups is the name the role variable used to store
 	// allowed kubernetes groups
 	TraitKubeGroups = "kubernetes_groups"
+
+	// TraitKubeUsers is the name the role variable used to store
+	// allowed kubernetes users
+	TraitKubeUsers = "kubernetes_users"
 
 	// TraitInternalLoginsVariable is the variable used to store allowed
 	// logins for local accounts.
@@ -553,6 +582,10 @@ const (
 	// UseOfClosedNetworkConnection is a special string some parts of
 	// go standard lib are using that is the only way to identify some errors
 	UseOfClosedNetworkConnection = "use of closed network connection"
+
+	// NodeIsAmbiguous serves as an identifying error string indicating that
+	// the proxy subsystem found multiple nodes matching the specified hostname.
+	NodeIsAmbiguous = "err-node-is-ambiguous"
 )
 
 const (
@@ -584,8 +617,21 @@ const (
 )
 
 const (
-	// ExecSubCommand is the sub-command Teleport uses to re-exec itself.
+	// ExecSubCommand is the sub-command Teleport uses to re-exec itself for
+	// command execution (exec and shells).
 	ExecSubCommand = "exec"
+
+	// ForwardSubCommand is the sub-command Teleport uses to re-exec itself
+	// for port forwarding.
+	ForwardSubCommand = "forward"
+)
+
+const (
+	// ChanDirectTCPIP is a SSH channel of type "direct-tcpip".
+	ChanDirectTCPIP = "direct-tcpip"
+
+	// ChanSession is a SSH channel of type "session".
+	ChanSession = "session"
 )
 
 // RSAKeySize is the size of the RSA key.

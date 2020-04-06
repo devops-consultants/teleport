@@ -39,6 +39,7 @@ type ServiceTestSuite struct {
 
 var _ = fmt.Printf
 var _ = check.Suite(&ServiceTestSuite{})
+var _ = testing.Verbose
 
 func (s *ServiceTestSuite) SetUpSuite(c *check.C) {
 	utils.InitLoggerForTests(testing.Verbose())
@@ -178,7 +179,7 @@ func (s *ServiceTestSuite) TestCheckPrincipals(c *check.C) {
 		},
 	}
 	for _, tt := range tests {
-		ok := checkPrincipals(testConnector, tt.inPrincipals, tt.inDNS)
+		ok := checkServerIdentity(testConnector, tt.inPrincipals, tt.inDNS)
 		c.Assert(ok, check.Equals, tt.outRegenerate)
 	}
 }
