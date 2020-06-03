@@ -522,6 +522,13 @@ func (s *AuthServer) generateUserCert(req certRequest) (*certs, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
+
+	kubeGroups, kubeUsers, err := req.checker.CheckKubeGroupsAndUsers(sessionTTL)
+	// NotFound errors are acceptable - this user may have no k8s access
+	// granted and that shouldn't prevent us from issuing a TLS cert.
+	if err != nil && !trace.IsNotFound(err) {
+		return nil, trace.Wrap(err)
+	}
 	userCA, err := s.Trust.GetCertAuthority(services.CertAuthID{
 		Type:       services.UserCA,
 		DomainName: clusterName,
@@ -535,12 +542,14 @@ func (s *AuthServer) generateUserCert(req certRequest) (*certs, error) {
 		return nil, trace.Wrap(err)
 	}
 	identity := tlsca.Identity{
-		Username:       req.user.GetName(),
-		Groups:         req.checker.RoleNames(),
-		Principals:     allowedLogins,
-		Usage:          req.usage,
-		RouteToCluster: req.routeToCluster,
-		Traits:         req.traits,
+		Username:         req.user.GetName(),
+		Groups:           req.checker.RoleNames(),
+		Principals:       allowedLogins,
+		Usage:            req.usage,
+		RouteToCluster:   req.routeToCluster,
+		KubernetesGroups: kubeGroups,
+		KubernetesUsers:  kubeUsers,
+		Traits:           req.traits,
 	}
 	subject, err := identity.Subject()
 	if err != nil {
