@@ -7,6 +7,10 @@ metadata:
 {{- if .Values.labels }}
 {{ toYaml .Values.labels | indent 4 }}
 {{- end }}
+{{- if .Values.deployment.annotations }}
+  annotations:
+{{ toYaml .Values.deployment.annotations | indent 4 }}
+{{- end }}
 spec:
 {{- if not .Values.config.highAvailability }}
   replicas: {{ .Values.replicaCount }}

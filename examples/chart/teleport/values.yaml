@@ -302,6 +302,11 @@ persistence:
 # set this to false to avoid running into issues for proxies that run in a separate k8s cluster
 automountServiceAccountToken: true
 
+# Deployment annotations
+## Added for use with https://github.com/stakater/Reloader
+deployment:
+  annotations: {}
+
 # Pod annotations
 annotations: {}
 ## See https://github.com/uswitch/kiam#overview
